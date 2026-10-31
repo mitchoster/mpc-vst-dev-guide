@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Companion screen — MPC VST field notes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav><a href="index.html">Start</a><a href="start.html">Build</a><a href="device.html">The device</a>
+  <a class="on" href="screen.html">Companion screen</a><a href="test.html">Testing</a><a href="ship.html">Ship</a><a href="agents.html">Agents</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">The screen that leaves the device</p>
+  <h1>Companion screen</h1>
+
+  <p class="lead">MPC presents a plugin screen as pictures plus polled values. A plugin cannot draw,
+  and every moving widget costs a redraw — enough of them and the audio crackles. So the plugin serves
+  its own page instead, and any phone on the same WiFi becomes the screen.</p>
+
+  <div class="card ok">
+    <h3>Credit where it belongs</h3>
+    <p>The idea is <a href="https://github.com/sunskiefer/VADER">VADER</a>’s (sunskiefer / L’Cronx,
+    MIT): since <strong>v0.6.0 (2026-10-24)</strong> VADER serves its plugin screen as a web page, for
+    exactly this reason, and documents it. What we borrowed is the approach — one canvas, motion
+    integrated between updates, fullscreen, add-to-home-screen — not code.</p>
+  </div>
+
+  <h2>What it looks like from outside</h2>
+  <table>
+    <tr><th>Endpoint</th><th>Purpose</th></tr>
+    <tr><td><code>GET /</code></td><td>the page — one canvas, no framework, no CDN</td></tr>
+    <tr><td><code>GET /state</code></td><td>JSON snapshot, refreshed every ~46 ms by the render block</td></tr>
+    <tr><td><code>POST /set?k=&amp;v=</code></td><td>write a parameter (needs header <code>X-MHE: 1</code>)</td></tr>
+    <tr><td><code>GET /diag</code></td><td>the last eight requests with peer and user agent</td></tr>
+    <tr><td><code>GET /healthz</code></td><td><code>ok</code>, for scripts</td></tr>
+  </table>
+  <p>Port 8099, overridable; <code>MHEC_HTTP=0</code> turns the listener off entirely,
+  <code>MHEC_HTTP_RW=0</code> makes it read-only. Four instance slots, <code>?i=0…3</code>.</p>
+
+  <h2>Five rules that keep it from hurting the device</h2>
+  <ol>
+    <li><strong>The audio thread only stores.</strong> The snapshot is written where the meter is
+      already computed, behind a seqlock, with no allocation, no lock and no syscall beyond reading the
+      clock. The server thread only loads. No pointer to the instance ever leaves the publish call, so
+      destroying the instance cannot race the server into freed memory.</li>
+    <li><strong>Writes travel through a ring into the audio thread.</strong> The HTTP thread validates
+      and queues <code>{index, value}</code>; <code>process_block</code> drains it and applies it. The
+      DSP state belongs to the render loop, not to a socket.</li>
+    <li><strong>One ring per instance.</strong> A shared ring was our first version and it silently ate
+      the other instance’s commands — the first audio thread to drain advanced the tail past them.</li>
+    <li><strong>The listener must not outlive the last instance.</strong> Count instances, and in the
+      last <code>detach()</code> stop and <em>join</em> the thread. This is the rule that cost us two
+      crashes.</li>
+    <li><strong>A header and timeouts.</strong> <code>X-MHE: 1</code> on writes means a stray web page
+      cannot post to the plugin (it would need a preflight the server never grants);
+      <code>SO_SNDTIMEO</code>/<code>SO_RCVTIMEO</code> mean a phone that stops reading cannot stall the
+      single accept loop.</li>
+  </ol>
+
+  <h2>The page</h2>
+  <p>Integrate the motion <em>in the page</em>: phases, reel angles, needle ballistics. Then a 7 Hz poll
+  looks continuous, and you do not need a socket. (A socket is worth it when something must follow the
+  audio clock sub-poll — a playhead in a sequencer. A knob panel is not that.)</p>
+<pre><code>function poll(){ fetch('/state',{cache:'no-store'}).then(r=&gt;r.json()).then(j=&gt;st=j).catch(()=&gt;{}); }
+setInterval(poll,140); poll();
+
+function draw(now){
+  var dt = Math.min(0.1,(now-last)/1000); last = now;
+  hits.length = 0;                        // every frame, or it leaks
+  /* integrate: phase += dt*rate, needle spring, reel angle */
+  /* draw, and push each control's hit region */
+  requestAnimationFrame(draw);
+}
+function post(k,v){ fetch('/set?k='+k+'&amp;v='+v,{method:'POST',headers:{'X-MHE':'1'}}); }</code></pre>
+  <p>Details that matter on a phone: smallest-hit-wins and inset adjacent boxes by a pixel; drop the hit
+  regions of a page that is only sliding in; update optimistically, let <code>/state</code> confirm one
+  block later; and float the value above the finger, because the finger is exactly where the number was.</p>
+
+  <h2>Build it once, reuse it</h2>
+  <p>The reusable pieces live in the reference port and in a scaffold folder:
+  <code>AKAI_MPC/VST/_framework/companion-screen/</code> (embed script, page test harness, the three
+  test drivers, a checklist). The page is a <strong>source file</strong> — <code>web/index.html</code> —
+  and a generator embeds it into the <code>.so</code>; a test asserts the embedded copy matches the
+  source, so an old page cannot ship.</p>
+
+  <h2>What it is not</h2>
+  <ul>
+    <li><strong>Not authenticated.</strong> It is open on the LAN by design. Keep the read-only switch
+      and say so in the README.</li>
+    <li><strong>Not a replacement for the skin.</strong> The device still needs a usable screen for when
+      the phone is not there.</li>
+    <li><strong>Not free of CPU.</strong> It measured 0.0 % of a core in our bench — the thread sleeps in
+      <code>poll()</code> — but it does add a socket to your plugin, which catalog reviewers will ask
+      about. Answer it in the release notes.</li>
+  </ul>
+
+  <p><a href="test.html">Next: testing →</a></p>
+</main>
+<footer><div class="wrap">Field notes · <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a> · MIT</div></footer>
+</body>
+</html>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Testing — MPC VST field notes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav><a href="index.html">Start</a><a href="start.html">Build</a><a href="device.html">The device</a>
+  <a href="screen.html">Companion screen</a><a class="on" href="test.html">Testing</a><a href="ship.html">Ship</a><a href="agents.html">Agents</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">Four rungs, each cheaper than the next</p>
+  <h1>Testing</h1>
+
+  <p class="lead">The device is slow to reach and easy to crash, so the cheap tests have to be good
+  enough to keep you off it. This is the ladder we actually run, and the bugs each rung caught.</p>
+
+  <h2>1 · The framework host test (seconds, x86)</h2>
+<pre><code>./test.sh        # → tools/test_port.sh: ASan + UBSan, two instances, every parameter</code></pre>
+  <p>Two instances, names, <code>set/get</code> on every parameter, option select and nudge, wheel and
+  Q-Link stepping, popup open/close, note → audio, chunk round-trip. <strong>Caught:</strong> a
+  parameter that was an enum in the JSON but missing from the engine’s text table (the control flipped,
+  the sound did nothing), and a buffer overrun in the wrapper’s display read-back.</p>
+
+  <h2>2 · Per-parameter round-trips you write yourself</h2>
+  <p>The framework test only exercises parameter 0 of each kind. Ours sets <em>every option of every
+  enum</em> through the real wrapper and checks value <em>and</em> display text — 43 checks.
+  <strong>Caught:</strong> labels beginning with a digit being read as an index
+  (<code>atoi("1/16") == 1</code>), which made two switches snap back while the sound changed.</p>
+<pre><code>set option k of enum E → read back value and effGetParamDisplay → compare with the label</code></pre>
+
+  <h2>3 · DSP tests with numbers, not ears</h2>
+  <p>Rendered checks per feature: bit-exactness when a stage is at zero, a null test against bypass,
+  THD ordering, level within a band, no NaN/Inf, determinism across runs, no sample step above the
+  signal’s own rise. <strong>Caught:</strong> an ADAA guard 1000× too small — in a decaying signal the
+  sample difference fell to 1e-6 and float rounding turned into 411 audible jumps in half a second.
+  The fix was a constant; finding it took three wrong attempts at the output stage.</p>
+
+  <h2>4 · Lifetime tests (offline, but about the host)</h2>
+  <p>Build the plugin’s worker code as a shared object, <code>dlopen</code> it, run the plugin lifecycle,
+  <code>dlclose</code> it, idle. <strong>Caught:</strong> the shape of the crash that took the device
+  down twice — a thread still parked in <code>poll()</code> when the library is unloaded dies with
+  SIGSEGV. The test asserts both directions: with the stop-and-join it survives, without it it must die,
+  or the test proves nothing.</p>
+
+  <h2>5 · The page, headless</h2>
+<pre><code>node web/pagetest.mjs web/index.html</code></pre>
+  <p>The real page script runs against a fake DOM and a recording canvas: the drawing must not throw in
+  either layout, every control must register a hit region, the geometry must fit and must not overlap
+  (all pages × both viewports), knob drags and switch holds must post the right values, and a swipe must
+  turn the page. <strong>Caught:</strong> a function and a variable with the same name, an unbounded hit
+  list, switches without keys, a lost helper, adjacent hit boxes sharing an exact edge, and a negative
+  arc radius when a timestamp went backwards.</p>
+
+  <h2>6 · The device, by hand or by agent</h2>
+  <p>Insert, play, save, reload: state must survive. Then the things no test on a host can see — knob
+  feel, Q-Link pickup, screen legibility, whether a switch behaves like a switch. Drive it through the
+  remote addin where you can (<a href="agents.html">see Agents</a>); a screenshot of a broken screen is
+  worth more than three paragraphs of reasoning.</p>
+
+  <div class="card note">
+    <h3>The rule behind the ladder</h3>
+    <p>Every bug that reached the device cost a deploy and, twice, a crash. Everything that was caught
+    on rung 1–5 cost a rebuild. If a class of bug has bitten you once, add a rung — the test is cheaper
+    than the next occurrence, and it is the only thing that keeps a regression from coming back.</p>
+  </div>
+
+  <h2>Bench, in one table</h2>
+  <table>
+    <tr><th>Stage</th><th>What it answers</th></tr>
+    <tr><td>idle</td><td>does the plugin cost anything when silent?</td></tr>
+    <tr><td>audio in</td><td>the honest baseline</td></tr>
+    <tr><td>Q-Link sweep</td><td>cost while parameters move (smoothing, ramps)</td></tr>
+    <tr><td>release tail</td><td>decay paths and denormals</td></tr>
+    <tr><td>trigger fire</td><td>one-shots, measured separately so they cannot decide the verdict</td></tr>
+    <tr><td>background threads</td><td>a listener or worker that should be asleep</td></tr>
+  </table>
+
+  <p><a href="ship.html">Next: ship →</a></p>
+</main>
+<footer><div class="wrap">Field notes · <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a> · MIT</div></footer>
+</body>
+</html>

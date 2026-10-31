@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Build — MPC VST field notes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav><a href="index.html">Start</a><a class="on" href="start.html">Build</a><a href="device.html">The device</a>
+  <a href="screen.html">Companion screen</a><a href="test.html">Testing</a><a href="ship.html">Ship</a><a href="agents.html">Agents</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">Toolchain · first plugin · the commands</p>
+  <h1>Build</h1>
+
+  <p class="lead">A port is one <code>vst.json</code>, one parameter file, an engine, and optionally a
+  layout. The framework compiles the wrapper, generates the parameter table and draws the skin.</p>
+
+  <h2 id="setup">Setup</h2>
+<pre><code>git clone https://github.com/sd88me/mpc-vst-plugins
+export MPC_VST_PLUGINS=$PWD/mpc-vst-plugins
+docker pull arm32v7/gcc:11-bullseye      # the device toolchain (glibc 2.31)</code></pre>
+  <p>Docker is not optional: the device is 32-bit ARM and the build must not pull a newer glibc than
+  the device has. Everything else runs on the host.</p>
+
+  <h2 id="anatomie">The five files that matter</h2>
+  <table>
+    <tr><th>File</th><th>What it decides</th></tr>
+    <tr><td><code>vst.json</code></td><td>name, vendor, uid, version, sources, defines, layout, presets</td></tr>
+    <tr><td><code>params.json</code> / module json</td><td>the parameter contract — order <em>is</em> the VST index, append-only</td></tr>
+    <tr><td><code>src/…</code></td><td>the engine</td></tr>
+    <tr><td><code>layout.conf</code></td><td>what the screen shows (or <code>custom_skin</code> + your own TUI.json)</td></tr>
+    <tr><td><code>build.sh</code> / <code>test.sh</code></td><td>two lines each around the framework tools</td></tr>
+  </table>
+
+  <div class="card note">
+    <h3>The contract is the product</h3>
+    <p>Parameters are a public API: presets, projects, Q-Links and the catalog all reference them by
+    index. <strong>Append only.</strong> A reordered list silently breaks every saved project, and
+    nobody notices until a user opens last week’s song.</p>
+  </div>
+
+  <h2 id="commands">The four commands</h2>
+<pre><code>./build.sh              # armhf .so + params.h + skin folder   (docker)
+./test.sh               # x86 host test under ASan/UBSan      (host, fast)
+tools/bench.sh build/x.so &lt;device-ip&gt;     # CPU on the real device
+DEVICE=&lt;ip&gt; ./make_skinset.sh --deploy    # stage the plugin folder on the device</code></pre>
+  <p><code>test.sh</code> is the one to run on every change: it creates two instances, exercises
+  <code>set/get</code> on every parameter, steps options the way a Q-Link does, renders audio, checks
+  NULL input, NRPN, thread stress and a chunk round-trip. It runs in seconds. If it fails, do not
+  deploy — a broken <code>.so</code> can take the app down, and MPC has no “unload plugin” button.</p>
+
+  <h2 id="erste">A first plugin, in order</h2>
+  <ol>
+    <li><strong>Stub the engine.</strong> Pass audio through unchanged. Build it, run the host test.
+      If this does not pass, nothing later will.</li>
+    <li><strong>Parameters.</strong> Add the ones the sound needs, not the ones the UI wants.
+      Give enums a label that does <em>not</em> start with a digit (see the traps).</li>
+    <li><strong>Skin.</strong> First <code>tools/studio.py serve</code>, then <code>preview</code>.
+      A layout is geometry plus a background; the renderer is the check, not your imagination.</li>
+    <li><strong>Bench.</strong> On the device, early. Cost is not linear in “how much DSP you wrote” —
+      a 4× oversampled saturator can be the whole budget.</li>
+    <li><strong>Device.</strong> Insert it, play it, save the project, reload it. A plugin that
+      sounds right but loses its state on reload is not finished.</li>
+  </ol>
+
+  <h2 id="fallen">Traps that bite during the build</h2>
+  <ul>
+    <li><strong>Option labels beginning with a digit.</strong> The wrapper used to read
+      <code>atoi("1/16")</code> as the option <em>index</em> — the control snapped back while the sound
+      changed. The current wrapper compares the full label first, but a port built against an older
+      wrapper keeps the old behaviour. Avoid such labels; if you need them, add a round-trip test for
+      every option of every enum (we do, 43 checks).</li>
+    <li><strong>A parameter that is an enum in <code>params.json</code> but missing from the engine’s
+      text table</strong> falls through to <code>atof("On") == 0</code>: the control flips and nothing
+      happens. The offline test catches it; the device would not have.</li>
+    <li><strong>Momentary parameters</strong> need <code>hold_ms</code>, otherwise the wrapper reports 0
+      after a single frame and “hold the switch” never was a hold.</li>
+    <li><strong>Degenerate ranges</strong> (<code>min == max</code>) make MPC unable to notice that a
+      readout changed; the plugin has to call <code>audioMasterUpdateDisplay</code> itself, from the
+      render block, never from inside a host callback.</li>
+    <li><strong>No <code>layout</code> in <code>vst.json</code></strong> means the auto-layout runs and
+      an enum with more than six options becomes a <code>popup</code>, which then aborts the build
+      because a hidden <code>&lt;key&gt;__open</code> parameter is missing. Write the layout.</li>
+  </ul>
+
+  <h2 id="zahlen">What it costs (measured, Live II)</h2>
+  <table>
+    <tr><th>Stage</th><th>Cost</th></tr>
+    <tr><td>tape-echo core alone</td><td>p99 ≈ 18.4 %</td></tr>
+    <tr><td>+ 4× oversampled saturator</td><td>p99 ≈ 23.9 % (+5.5 pp)</td></tr>
+    <tr><td>+ chorus, dropouts, spread</td><td>+0.7 pp together</td></tr>
+    <tr><td>whole plugin, 32 params, companion listener</td><td><strong>p99 24.4 %</strong>, worst block 26.2 %</td></tr>
+    <tr><td>the companion HTTP thread</td><td>0.0 % of a core</td></tr>
+  </table>
+  <p>A block is 2902 µs. If p99 crosses ~25 % the device is no longer comfortable; the oversampler is
+  usually the first thing to question, not the modulation.</p>
+
+  <p><a href="device.html">Next: the device →</a></p>
+</main>
+<footer><div class="wrap">Field notes · <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a> · MIT</div></footer>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MPC &amp; Force plugin development — field notes</title>
+<meta name="description" content="How native VST2 plugins for MPC OS and Force are actually built, tested and shipped — written from the bench, with the numbers.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav>
+    <a class="on" href="index.html">Start</a>
+    <a href="start.html">Build</a>
+    <a href="device.html">The device</a>
+    <a href="screen.html">Companion screen</a>
+    <a href="test.html">Testing</a>
+    <a href="ship.html">Ship</a>
+    <a href="agents.html">Agents</a>
+  </nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">MPC Live · One · X · Key · Force — MPC OS 3.x</p>
+  <h1>Native plugins for MPC OS.<br>What actually works, and what it costs.</h1>
+
+  <p class="lead">These are working notes, not a product page. Every number here was measured on a
+  device, every trap was hit at least once, and the places where we are still guessing are marked as
+  guesses. The point is that someone building the next plugin does not have to rediscover them.</p>
+
+  <div class="card ok">
+    <h3>What this is built on</h3>
+    <p>Everything here runs on <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a>
+    (MIT) — the wrapper, the parameter compiler, the skin generator, the offline host test, the CPU
+    bench, the packager and the catalog. That project is the reason any of this is possible; these
+    notes only add what comes after “it builds”.</p>
+  </div>
+
+  <h2>The three things a plugin is</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>1 · An engine</h3>
+      <p>A block renderer: 128-frame int16 stereo blocks at 44.1 kHz, through <code>mpc_engine_t</code>.
+      No allocation in the render path, no locks, no logs, no file I/O.</p>
+      <p><a href="start.html">Building →</a></p>
+    </div>
+    <div class="card">
+      <h3>2 · A screen MPC can draw</h3>
+      <p>MPC draws it itself, from pre-rendered PNGs plus values it polls. You do not get a framebuffer.
+      Animated or dense UI has to leave the device.</p>
+      <p><a href="screen.html">Companion screen →</a></p>
+    </div>
+    <div class="card">
+      <h3>3 · A folder and a line of XML</h3>
+      <p><code>/sdcard/Synths/&lt;vendor&gt; - VST - &lt;name&gt;/</code> plus one entry in
+      <code>MPC.settings</code>. Get the sequence wrong and MPC resets its settings.</p>
+      <p><a href="device.html">The device →</a></p>
+    </div>
+  </div>
+
+  <h2>The loop that works</h2>
+<pre><code>build (arm32, docker)     →  test (x86, ASan)  →  bench (device, CPU)  →  deploy  →  see it</code></pre>
+  <p>Two of those four steps are cheap enough to run on every change. The expensive one is “see it” —
+  a deploy plus an insert plus a screenshot. Making that step fast is what <a href="screen.html">the
+  companion screen</a> and <a href="agents.html">the agent tooling</a> are about.</p>
+
+  <h2>What we shipped with these notes</h2>
+  <p><a href="https://github.com/mitchoster/mpc-vst-multihead-echo">MPC Multihead Echo</a> — a
+  three-head tape echo, GPL-3.0, 32 parameters, three interface pages in a browser, bench
+  <strong>p99 24.4 %</strong> of the 2902 µs block on a Live II. It is the worked example behind
+  every page here, including the two crashes that shaped the rules.</p>
+
+  <h2>Read in this order</h2>
+  <table>
+    <tr><th>Page</th><th>Why</th></tr>
+    <tr><td><a href="start.html">Build</a></td><td>Toolchain, first plugin, the commands and what they prove.</td></tr>
+    <tr><td><a href="device.html">The device</a></td><td>The fourteen facts that cost time: services, paths, skins, <code>/proc</code>, crashes.</td></tr>
+    <tr><td><a href="screen.html">Companion screen</a></td><td>Giving a plugin a real UI without asking MPC to draw it.</td></tr>
+    <tr><td><a href="test.html">Testing</a></td><td>What each test catches, and the bugs that got past the ones we had.</td></tr>
+    <tr><td><a href="ship.html">Ship</a></td><td>Release zip, licence rules, catalog entry, the exact API calls.</td></tr>
+    <tr><td><a href="agents.html">Agents</a></td><td>Driving a device from a model — what exists today, what is missing.</td></tr>
+  </table>
+
+  <p class="meta">Last verified: 2026-11-02 · MPC Live II · MPC OS 3.9.1.2 (AZ0x 5.0.17) ·
+  armv7 · glibc 2.31 build image</p>
+</main>
+
+<footer><div class="wrap">
+  Field notes for <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a>.
+  Text: MIT. The plugins keep their own licences. No Akai or AIR assets anywhere in this.
+</div></footer>
+</body>
+</html>

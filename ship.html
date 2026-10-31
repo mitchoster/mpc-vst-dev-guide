@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ship — MPC VST field notes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav><a href="index.html">Start</a><a href="start.html">Build</a><a href="device.html">The device</a>
+  <a href="screen.html">Companion screen</a><a href="test.html">Testing</a><a class="on" href="ship.html">Ship</a><a href="agents.html">Agents</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">Release · licence · catalog</p>
+  <h1>Ship</h1>
+
+  <p class="lead">Shipping is four artefacts and one decision: what licence the code must have. Then a
+  pull request with one JSON file.</p>
+
+  <h2>The four artefacts</h2>
+  <table>
+    <tr><th>Artefact</th><th>Made by</th><th>Notes</th></tr>
+    <tr><td>the plugin folder</td><td>your build</td><td><code>.so</code> + skin + <code>version.xml</code></td></tr>
+    <tr><td>one zip</td><td><code>tools/release.py</code></td><td>installer, uninstaller, INSTALL.md, manifest, SHA256SUMS</td></tr>
+    <tr><td><code>tested.json</code></td><td>you</td><td>device, firmware, date — this is what makes a listing “Verified”</td></tr>
+    <tr><td>catalog entry</td><td>a PR</td><td><code>catalog/plugins/&lt;id&gt;.json</code>, no versions or checksums inside</td></tr>
+  </table>
+
+  <h2>Version numbers are a convention, not a style</h2>
+  <p><code>vst.json</code> carries an integer: <code>1010</code> is <strong>1.0.1</strong>
+  (<code>major*1000 + minor*100 + patch*10</code>). Get it wrong and the release says 1.0.0 while the
+  plugin inside says 1.0.1 — nobody notices until a bug report quotes the wrong version.</p>
+
+  <h2>Licence decides what you can publish</h2>
+  <ul>
+    <li>Check the <strong>vendored code’s own licence file</strong>, not a catalog field; they disagree
+    in this ecosystem.</li>
+    <li>GPL is viral: a GPL core makes the plugin GPL-3.0-only. That is fine — it just has to be stated
+    and the source has to be public.</li>
+    <li>Ship a root <code>LICENSE</code> with an SPDX-identifiable text, a <code>THIRD_PARTY_NOTICES</code>
+    naming upstream commits and your local changes, and no manufacturer assets (no stock skins, no
+    logos, no product art).</li>
+    <li>If you build from firmware-derived material, you must not publish a zip at all — the catalog has
+    a <em>build-yourself</em> path for that.</li>
+  </ul>
+
+  <h2>Release, without <code>gh</code></h2>
+<pre><code># tag + release
+POST /repos/&lt;owner&gt;/&lt;repo&gt;/releases          {"tag_name":"v1.0.1","name":"…","body":"…"}
+# asset
+POST https://uploads.github.com/repos/&lt;owner&gt;/&lt;repo&gt;/releases/&lt;id&gt;/assets?name=&lt;zip&gt;
+# verify the upload against your local hash
+sha256sum dist/&lt;zip&gt;     ==     the "digest" the API returns</code></pre>
+  <p>Releases are immutable in practice: never re-upload under an existing tag, cut a new one.</p>
+
+  <h2>Before anything becomes public</h2>
+  <ul>
+    <li><strong>Export, do not publish the working tree.</strong> Build a folder with source, docs,
+      LICENSE, README, <code>tested.json</code>; leave out internal notes, build output and device
+      screenshots of things you removed.</li>
+    <li><strong>Strip what is private but not secret:</strong> device IPs, host paths, personal
+      hostnames. Turn hardcoded IPs in scripts into <code>${DEVICE:?set DEVICE}</code>.</li>
+    <li><strong>Run a check.</strong> <code>tools/publish-check/check.sh &lt;export&gt;</code> must exit 0.
+      It catches addresses and paths that secret scanning does not.</li>
+    <li><strong>Verify the push.</strong> A push that printed a normal line left our first repository
+      empty. Ask the API for <code>/contents</code> or <code>/commits</code> before believing it.</li>
+  </ul>
+
+  <h2>The catalog PR</h2>
+<pre><code>{ "id": "mpc-multihead-echo", "name": "MPC Multihead Echo", "author": "you",
+  "repo": "you/mpc-vst-multihead-echo", "kind": "effect", "license": "GPL-3.0-only",
+  "summary": "One line, descriptive.",
+  "screenshot": "https://raw.githubusercontent.com/you/…/&lt;commit&gt;/docs/panel.png",
+  "style": "delay", "tags": ["tape-echo","delay"] }</code></pre>
+  <p>Validate it locally first: <code>python3 tools/catalog_build.py --check-registry</code> and
+  <code>python3 tools/catalog_check.py &lt;zip&gt; --catalog</code>. Then one PR adding that file. CI
+  checks the entry and your latest release; new releases appear on their own afterwards.</p>
+
+  <div class="card note">
+    <h3>The one warning you will get</h3>
+    <p><code>catalog_check</code> flags a <code>.so</code> that calls <code>socket/bind/accept</code>.
+    If that is the companion screen, say so in the release notes and the PR: what it serves, that it
+    never sends anything outbound, and which environment switch turns it off. An explained warning is
+    not a problem; an unexplained one is a question the maintainer has to ask.</p>
+  </div>
+
+  <h2>What a good listing says</h2>
+  <ul>
+    <li><strong>Tested on</strong> a named device, firmware and date — and the truth about what was
+    not tested.</li>
+    <li><strong>Bench figure</strong>, because “optimised” without a number is a wish.</li>
+    <li><strong>Limits</strong>: what it cannot do, and what it depends on.</li>
+    <li><strong>Credit</strong> for anything you borrowed — an idea counts, and saying where it came
+    from costs one paragraph.</li>
+  </ul>
+
+  <p><a href="agents.html">Next: agents →</a></p>
+</main>
+<footer><div class="wrap">Field notes · <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a> · MIT</div></footer>
+</body>
+</html>

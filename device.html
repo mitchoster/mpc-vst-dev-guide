@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The device — MPC VST field notes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav><a href="index.html">Start</a><a href="start.html">Build</a><a class="on" href="device.html">The device</a>
+  <a href="screen.html">Companion screen</a><a href="test.html">Testing</a><a href="ship.html">Ship</a><a href="agents.html">Agents</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">MPC Live II · MPC OS 3.9.1.2 · armv7</p>
+  <h1>The device</h1>
+  <p class="lead">Fourteen facts, each of which cost real time. They are not opinions; they were read
+  off the device or learned the hard way.</p>
+
+  <h2>1 · It is a Linux box with a BusyBox userland</h2>
+<pre><code>ssh root@&lt;ip&gt;            # root, LAN only
+ps | head -n 5           # BusyBox: "head -5" does not exist
+systemctl status acvs    # the MPC app runs as acvs.service</code></pre>
+  <p><code>acvs</code> is the whole application. Restart it and the screen goes down and comes back;
+  that is how a new <code>.so</code> is loaded. Older firmware calls the unit <code>inmusic-mpc</code>.</p>
+
+  <h2>2 · A plugin is a folder and one XML line</h2>
+<pre><code>/sdcard/Synths/&lt;vendor&gt; - VST - &lt;name&gt;/
+    mpc_&lt;something&gt;.so
+    version.xml
+    Plugin Skins/{TUI.json, Q-Links.json, *.png}
+MPC.settings  →  pluginList-arm  →  KNOWNPLUGINS  →  &lt;PLUGIN format="VST" file="…"/&gt;</code></pre>
+  <p>MPC finds a skin by <em>folder name</em>: <code>&lt;vendor&gt; - VST - &lt;product&gt;</code>. The
+  <code>.so</code> may live elsewhere; the folder name is what binds.</p>
+
+  <h2>3 · Never edit <code>MPC.settings</code> while MPC runs</h2>
+  <p>It keeps settings in memory and rewrites the file. A malformed edit resets everything to defaults.
+  The only correct sequence is <strong>stop → back up → edit → start</strong>. Every installer and
+  <code>mpc-store.sh</code> does exactly that; there is no shortcut worth the risk.</p>
+
+  <h2>4 · A new skin does not need a restart; a new <code>.so</code> does</h2>
+  <p>MPC re-reads <code>Plugin Skins/TUI.json</code> on every insert, so remove the instance and insert
+  again to see a changed skin. The shared library, however, <strong>stays mapped</strong> for the life
+  of the process: replacing the file on disk does not change the running code, and a remove + re-insert
+  does not reload it either. Check with <code>grep multihead /proc/$(pidof MPC)/maps</code> — the entry
+  reads <code>(deleted)</code> when the file was replaced under a running process, and the plugin you
+  are looking at is still the old build.</p>
+
+  <div class="card warn">
+    <h3>5 · A thread that outlives the plugin can take the app down</h3>
+    <p>Two <em>“OOPS! Your MPC recovered from an internal error”</em> in one afternoon came from a
+    listener thread the plugin started and never stopped. Whether the host actually unloads the library
+    is still not proven on this firmware — we measured that it does <em>not</em> — so the honest rule is
+    the defensive one: <strong>a worker thread must be stopped and joined before
+    <code>destroy_instance</code> returns</strong>. It costs nothing and closes the case if the host ever
+    does unload. <a href="test.html">A dlclose test</a> reproduces the failure shape offline.</p>
+  </div>
+
+  <h2>6 · The screen is a PNG canvas you cannot draw on</h2>
+  <p>The plugin area is 1280×628 inside a 1280×800 screen. Layout coordinates are shadow coordinates:
+  a widget’s <code>cy</code> is drawn 86 px higher. Below y ≈ 542 there is no room for widget labels any
+  more — bake those into the plate. MPC draws every label and value; you supply the picture and the
+  values it polls.</p>
+
+  <h2>7 · Widget animation costs a redraw</h2>
+  <p>A busy screen has audibly crackled the audio on this hardware. A single meter strip polled every
+  ~46 ms is fine. Anything more belongs off the device — that is the whole reason for
+  <a href="screen.html">the companion screen</a>.</p>
+
+  <h2>8 · The host has no “reload” and no “unload”</h2>
+  <p>There is no API to reload a plugin, so a build–see-it loop is: deploy, remove the instance, insert
+  it again — and restart <code>acvs</code> when the <code>.so</code> changed. Everything else is
+  waiting for a human to tap a plugin list.</p>
+
+  <h2>9 · Screenshots and input come from an addin, not from the app</h2>
+  <p><code>jacob-sabella/mpc-addin-remote</code> (MIT, <code>LD_PRELOAD</code>) serves the live screen,
+  touch injection, MIDI and an MCP endpoint on <code>127.0.0.1:6720</code>:
+  <code>screenshot</code>, <code>tap</code>, <code>drag</code>, <code>scroll</code>,
+  <code>wait_for_screen</code>, <code>play_notes</code>, <code>device_status</code>,
+  <code>list_files</code>. Hardware buttons are <em>not</em> injectable (no virtual RawMIDI port), so
+  anything behind <code>PROJECT → LOAD</code> is still a human’s job.</p>
+  <p>Argument shapes matter and fail silently: <code>drag</code> takes flat
+  <code>from_x/from_y/to_x/to_y</code>, and <code>scroll</code> needs
+  <code>x</code>, <code>y</code>, <code>direction</code> and an <code>amount</code> of 20–2000 px.
+  A wrong shape looks exactly like a tap that did nothing.</p>
+
+  <h2>10 · Files that carry state</h2>
+  <table>
+    <tr><th>Path</th><th>What</th></tr>
+    <tr><td><code>/sdcard/Synths/…</code></td><td>plugin folder (skin, <code>.so</code>, presets)</td></tr>
+    <tr><td><code>/sdcard/MPC Documents/Plugin Presets/Insert Effects/&lt;folder&gt;/</code></td><td>effect presets (<code>.xpl</code>) — <em>not</em> the skin’s <code>Presets/</code>, which is the instrument path</td></tr>
+    <tr><td><code>/sdcard/MPC Documents/Projects/*.xpj</code></td><td>songs; a half-written one is a lost session</td></tr>
+    <tr><td><code>/data/Settings/MPC/MPC.settings</code></td><td>the plugin registry (see 3)</td></tr>
+    <tr><td><code>/data/sentry/.sentry-db/</code></td><td>crash records; the payload has no symbols</td></tr>
+  </table>
+
+  <h2>11 · A preset menu that stays empty</h2>
+  <p>A port without <code>"presets": "presets.json"</code> in <code>vst.json</code> has an empty PRESET
+  field even when <code>.xpl</code> files sit in the right folder: the field is the VST program list, not
+  the file list. Each preset needs at least one value or the build aborts.</p>
+
+  <h2>12 · Parameters are read back as text</h2>
+  <p><code>effGetParamDisplay</code> is what MPC shows, and it is also what the host compares when it
+  decides whether a control moved. Get the text wrong and the control springs back — the sound changes,
+  the display does not, and it looks like a broken button.</p>
+
+  <h2>13 · CPU is measured, not estimated</h2>
+  <p><code>tools/bench.sh</code> plays the plugin on the device and times the audio thread:
+  idle, audio in, Q-Link sweep, release tail, one-shot triggers separately. Verdict against the
+  2902 µs block. Numbers from a desktop are meaningless — an M-series core is not a Cortex-A17.</p>
+
+  <h2>14 · What you cannot get for free</h2>
+  <ul>
+    <li><strong>Audio capture off the device:</strong> there is no loopback. A plugin can report its own
+      levels; anything else is a microphone.</li>
+    <li><strong>Crash symbols:</strong> the built-in crash records carry no frames, so a crash is
+      diagnosed by correlation and by <code>/proc</code>, not by a backtrace.</li>
+    <li><strong>Hardware buttons:</strong> see 9.</li>
+    <li><strong>A second screen:</strong> see 6 and 7.</li>
+  </ul>
+
+  <p><a href="screen.html">Next: the companion screen →</a></p>
+</main>
+<footer><div class="wrap">Field notes · <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a> · MIT</div></footer>
+</body>
+</html>

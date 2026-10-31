@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agents — MPC VST field notes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap">
+  <a class="brand" href="index.html">MPC VST · field notes</a>
+  <nav><a href="index.html">Start</a><a href="start.html">Build</a><a href="device.html">The device</a>
+  <a href="screen.html">Companion screen</a><a href="test.html">Testing</a><a href="ship.html">Ship</a><a class="on" href="agents.html">Agents</a></nav>
+</div></header>
+
+<main class="wrap">
+  <p class="kicker">Letting a model drive the bench</p>
+  <h1>Agents</h1>
+
+  <p class="lead">A model writes a plugin quickly. What it cannot do, today, is <em>see</em> the device.
+  That gap is where the time goes: coordinates guessed from a screenshot, taps that silently miss,
+  and a crash nobody can explain because the device keeps no symbols.</p>
+
+  <h2>What already exists</h2>
+  <table>
+    <tr><th>Piece</th><th>What it gives you</th></tr>
+    <tr><td><a href="https://github.com/jacob-sabella/mpc-addin-remote">addin <code>remote</code></a> (MIT)</td>
+      <td>the live screen, touch injection, MIDI, and a JSON-RPC MCP endpoint on <code>127.0.0.1:6720</code> —
+      <code>screenshot</code>, <code>tap</code>, <code>drag</code>, <code>scroll</code>,
+      <code>wait_for_screen</code>, <code>play_notes</code>, <code>device_status</code>, <code>list_files</code></td></tr>
+    <tr><td><a href="https://github.com/jacob-sabella/mpc-addin-commander">addin <code>commander</code></a></td>
+      <td>the loaded plugins with their skins, MPC’s transport and <em>parameter changes</em> over HTTP/WS — no tapping required</td></tr>
+    <tr><td><a href="https://github.com/jacob-sabella/mpc-addin-filebrowser">addin <code>filebrowser</code></a></td>
+      <td>browse the device drives in a browser (deploy without <code>scp</code> acrobatics)</td></tr>
+    <tr><td><a href="https://github.com/jacob-sabella/mpc-addin-usb-audio">addin <code>usb-audio</code></a></td>
+      <td>the MPC as a USB audio interface — worth knowing before you assume “no loopback” forever</td></tr>
+    <tr><td><a href="https://github.com/sd88me/mpc-addin-skipback">addin <code>skipback</code></a></td>
+      <td>records the main output all the time, saves the last 30–60 s</td></tr>
+    <tr><td><code>mpc-store.sh</code>, Plugin Manager, <a href="https://github.com/padbangers/mpc-link">MPC Link</a></td>
+      <td>installing, updating, and getting files from a computer into the device</td></tr>
+    <tr><td>patches: <code>drum-pad-layout</code>, <code>drive-exec</code>, <code>button-remap</code></td>
+      <td>what a patch can change without touching a plugin at all</td></tr>
+  </table>
+
+  <h2>What a development agent actually needs</h2>
+  <p>From one real port — a plugin built, tested, deployed, driven and twice crashed — the missing
+  pieces are not “more tools”, they are <em>named handles</em> and <em>evidence</em>:</p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Say the name, not the coordinate</h3>
+      <p>The skin already declares every widget and its bounds. A helper that parses the installed
+      <code>TUI.json</code> can answer “where is the RESONANCE knob, what is its value” and tap it by
+      name. MPC’s own screens (plugin list, dialogs) are fixed-pitch lists: record their geometry once,
+      with a human watching, and replay it with assertions instead of re-deriving pixels every session.</p>
+    </div>
+    <div class="card">
+      <h3>Every action returns evidence</h3>
+      <p>Before/after screenshot hash, the changed rectangle, the parameter value read back. “The tap
+      landed and nothing happened” has to be a visible result, not a story the model tells itself.</p>
+    </div>
+    <div class="card">
+      <h3>Health and crash facts</h3>
+      <p>MPC pid, whether the <code>.so</code> is still mapped, the <code>/data/sentry</code> tail,
+      audio-worker CPU from <code>/proc</code>, xruns. That is what turned “it crashed twice” into a
+      rule in <a href="device.html">the device page</a>.</p>
+    </div>
+    <div class="card">
+      <h3>Safe staging</h3>
+      <p>Snapshot and restore of <code>MPC.settings</code>, the plugin folder and the project; a single
+      “remove and re-insert” verb; a watchdog that restarts <code>acvs</code> when a plugin took it down.</p>
+    </div>
+  </div>
+
+  <h2>Proposal: a development bench as a plugin</h2>
+  <p>A resident <strong>addin</strong> (plus a thin host CLI) that turns the loop into verbs:
+  <code>screen.describe</code>, <code>screen.act(name)</code>, <code>param.set(instance, id, value)</code>,
+  <code>plugin.reset</code>, <code>device.health</code>, <code>crash.explain</code>. It composes the
+  <code>remote</code> and <code>commander</code> addins instead of reimplementing them, speaks JSON-RPC
+  on <code>127.0.0.1</code> with the same names as its MCP tools, and every answer carries
+  <code>{ok, before, after, evidence[]}</code>.</p>
+  <p><strong>First release, read-only:</strong> describe a screen, act on one binding, report health and
+  the plugin’s own diagnostics. Writes come second, behind snapshot/rollback.</p>
+
+  <div class="card warn">
+    <h3>Do not build these</h3>
+    <ul>
+      <li><strong>Audio capture through the plugin.</strong> The render goes to the DAC; there is no
+      loopback. A plugin can report its own levels — that is the honest path.</li>
+      <li><strong>Writing <code>MPC.settings</code> while MPC runs.</strong> Stop first or lose the
+      settings file.</li>
+      <li><strong>Hardware-button injection.</strong> No virtual RawMIDI port; the remote addin reports
+      zero buttons. Anything behind <code>MENU</code> stays a human step.</li>
+      <li><strong>Opening <code>/dev/dri</code> inside an addin.</strong> Whoever opens the card first
+      becomes DRM master and MPC dies on the spot.</li>
+      <li><strong>Threads that outlive what started them.</strong> That is the crash this whole site
+      keeps coming back to.</li>
+    </ul>
+  </div>
+
+  <h2>How to drive it today, without the bench</h2>
+<pre><code>ssh -N -L 6720:127.0.0.1:6720 root@&lt;ip&gt;        # the addin listens on the device only
+curl -s localhost:6720/info                    # {"width":1280,"height":800,"touch":"/dev/input/event0"}
+# screenshot → tap → screenshot; assert with a hash or a region diff, never by hope
+# and read /proc/&lt;pid&gt;/maps when a deploy “did nothing”</code></pre>
+
+  <p class="meta">The proposal above was drafted by a model (DeepSeek V4.1 Flash) from this week’s
+  session notes and then cut down to what the evidence supports. The “inference” markers are gone on
+  purpose: everything left here was either measured or is labelled as not proven.</p>
+</main>
+<footer><div class="wrap">Field notes · <a href="https://github.com/sd88me/mpc-vst-plugins">sd88me/mpc-vst-plugins</a> · MIT</div></footer>
+</body>
+</html>
