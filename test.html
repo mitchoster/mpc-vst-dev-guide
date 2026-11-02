@@ -59,9 +59,36 @@
 
   <h2>6 · The device, by hand or by agent</h2>
   <p>Insert, play, save, reload: state must survive. Then the things no test on a host can see — knob
-  feel, Q-Link pickup, screen legibility, whether a switch behaves like a switch. Drive it through the
-  remote addin where you can (<a href="agents.html">see Agents</a>); a screenshot of a broken screen is
-  worth more than three paragraphs of reasoning.</p>
+  feel, Q-Link pickup, screen legibility, whether a switch behaves like a switch.</p>
+
+  <h3>Drive it: the remote addin</h3>
+  <p><a href="https://github.com/jacob-sabella/mpc-addin-remote">jacob-sabella/mpc-addin-remote</a>
+  (MIT) is an <em>addin</em>: a small shared library MPC loads through <code>LD_PRELOAD</code>, so it
+  runs inside the MPC process. It captures the real screen over DRM, writes touches into the
+  touchscreen's evdev node, presses hardware buttons, opens an ALSA MIDI port and reports device
+  status — as HTTP routes and as an MCP server on <code>/mcp</code>.</p>
+<pre><code>ssh -N -L 6720:127.0.0.1:6720 root@&lt;ip&gt;   # it listens on the device only
+curl -s localhost:6720/info              # screen size, pixel format, touch device
+curl -s "localhost:6720/tap?x=640&amp;y=300" # a real touch, seen by MPC as a finger
+curl -s "localhost:6720/screen.png" -o shot.png
+curl -s localhost:6720/mcp -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</code></pre>
+
+  <p>The MCP side is what an agent should use: <code>screenshot</code> (with a labelled pixel grid),
+  <code>tap</code> / <code>drag</code> / <code>scroll</code>, <code>wait_for_screen</code>,
+  <code>play_notes</code> and <code>send_midi</code>, <code>device_status</code>. The workspace wraps
+  it in <code>vst/device_test.sh</code> (<code>shot</code>, <code>tap</code>, <code>drag</code>,
+  <code>call</code>).</p>
+
+  <p><strong>How it combines with a companion screen:</strong> the addin sees and touches the
+  <em>device</em>, the companion answers questions about the <em>plugin</em>. So the loop is
+  screenshot → tap the control where it is actually drawn → read <code>/state</code> to prove the
+  parameter moved. That is the difference between "the switch looks wrong" and "the switch is at
+  cy=658, which is outside the touchable area, and tapping it changes nothing". Both of those cost
+  real time here; only the second one is a fix.</p>
+
+  <p><strong>Treat it as a development tool.</strong> It runs as root inside MPC and has no login;
+  it binds to loopback for that reason, and <code>bind=0.0.0.0</code> gives anyone on the LAN your
+  screen, your touches and a MIDI port into MPC. Never install it on a device you gig with.</p>
 
   <div class="card note">
     <h3>The rule behind the ladder</h3>
