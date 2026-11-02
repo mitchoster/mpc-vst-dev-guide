@@ -98,6 +98,38 @@
     </ul>
   </div>
 
+  <h2>When the agent is the one laying out the screen</h2>
+
+  <p>Skin work is where an agent burns an afternoon fastest, because the feedback loop is the
+  device. This week it did exactly that: switches that did not react were “fixed” five times —
+  bigger art, padded hit boxes, a different widget — and every attempt needed a rebuild, a deploy
+  and a human finger. The cause was one number that had been written down all along: a widget is
+  drawn <strong>86 px above its <code>cy</code></strong>, so in a 1280×628 area nothing below
+  <strong>art y ≈ 542</strong> has a reachable touch box. The switches sat at <code>cy=658</code>.
+  Every “fix” changed the thing that was not broken.</p>
+
+  <div class="card">
+    <p><strong>The loop that converges, in this order:</strong></p>
+    <ol>
+      <li>Read the layout skill first (<code>.opencode/skills/mpc-ui-builder</code>). It carries the
+      offsets, the canvas budget, and which widget to use for which kind of value.</li>
+      <li><code>tools/skin_check.py "&lt;skin&gt;/Plugin Skins"</code> — reports <code>EDGE</code>
+      (box past 1280×628), <code>TOUCH</code> (two touch boxes overlapping), <code>QLINK</code>,
+      <code>OPTS</code> per page, in about a second. <code>gen_vst.py</code> prints the same findings
+      after every build. A skin with any finding is not deployed.</li>
+      <li><code>studio.py preview</code> for the picture, including the variant per stateful
+      widget — that is the only way to see a pressed switch without touching the device.</li>
+      <li>Only then build and deploy. A skin needs remove/re-insert; a <code>.so</code> needs an
+      <code>acvs</code> restart. Removing and re-inserting a plugin does <em>not</em> reload a new
+      library.</li>
+    </ol>
+  </div>
+
+  <p>Two facts that cost the most, and neither is about taste: <strong>a <code>toggle</code> never
+  fired on a 2-option enum</strong> on this OS build (<code>enum_h</code> did, immediately), and
+  <strong>MPC acts on release</strong>, not on touch-down. If a control must show its state, it has
+  to latch.</p>
+
   <h2>How to drive it today, without the bench</h2>
 <pre><code>ssh -N -L 6720:127.0.0.1:6720 root@&lt;ip&gt;        # the addin listens on the device only
 curl -s localhost:6720/info                    # {"width":1280,"height":800,"touch":"/dev/input/event0"}
